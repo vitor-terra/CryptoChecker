@@ -1,6 +1,7 @@
 import requests
 import streamlit as st
 from datetime import datetime
+import time
 
 def buildCoinList(list):
     str = ""
@@ -42,19 +43,41 @@ def defineBounds():
         current_coin = selected_coins[i]
 
         with st.form(key = current_coin):
+            if "invalid_bounds" in st.session_state:
+                if st.session_state.invalid_bounds:
+                    st.write("Digite apenas valores numéricos")
+
             upper_bound = st.text_input(f"Notificar caso {current_coin} esteja acima de:")
             lower_bound = st.text_input(f"Notificar caso {current_coin} esteja abaixo de:")
             submitted = st.form_submit_button("Confirmar")
 
             if submitted:
-                st.session_state.bounds[current_coin] = (upper_bound, lower_bound)
-                st.session_state.current_index += 1
+                try:
+                    st.session_state.bounds[current_coin] = (float(upper_bound), float(lower_bound))
+                    st.session_state.invalid_bounds = False
+                    st.session_state.current_index += 1
+                except ValueError:
+                #Tecnicamente, o usuário pode definir um limite superior menor do que o limite inferior se ele quiser. O programa vai se comportar de acordo.
+                    st.session_state.invalid_bounds = True
                 st.rerun()
     else:
         st.success("Informações salvas")
         st.session_state.bounds_defined = True
         st.button("Ok")
 
+def getApiKey():
+    if "api_key" not in st.session_state:
+        st.session_state.api_key = "CG-VeKmL7uUadCQACDheMQ7E7hM"
+
+    st.session_state.api_key = st.text_input("Digite sua própria chave de API aqui. Deixe em branco se quiser usar a chave padrão.")
+
+def writeHistoricalData(data):
+    for entry in data[0]:
+        with open(f"{entry}.txt", "a") as f:
+            f.write(str(data[1]) + "\n")
+            for item in data[0][entry].items():
+                f.write(f"{item[0]}: {item[1]}\n")
+            f.write("\n")
 
 
 def doUI():
@@ -72,18 +95,21 @@ def doUI():
         defineBounds()
 
     else:
-        st.write("### Resultados finais:")
-        st.json(st.session_state.bounds)
+        st.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
+        getApiKey()
+        data = getData(st.session_state.selected_coins, 0, st.session_state.api_key)
 
+        st.write(data)
+
+        #Escreve em um arquivo os dados históricos, caso seja bom pra fazer gráfico
+        writeHistoricalData(data)
+
+        time.sleep(600)
+        st.rerun()
 
 def main():
+
     doUI()
-    api_key = "CG-VeKmL7uUadCQACDheMQ7E7hM"
-    
-
-    #print(getData(coin_list,0,api_key))
-    
-
 
 if __name__ == "__main__":
     main()
