@@ -10,10 +10,10 @@ def buildCoinList(list):
     return str
 
 def getData(coin_list, preferred_money, api_key):
-    coin_list = buildCoinList(coin_list)
+    list = buildCoinList(coin_list)
     url = "https://api.coingecko.com/api/v3/simple/price"
     headers = {"x-cg-demo-api-key": api_key}
-    querystring = {"vs_currencies":"brl","names":coin_list,"include_market_cap":"true","include_24hr_vol":"true","include_24hr_change":"true","include_last_updated_at":"true"}
+    querystring = {"vs_currencies":"brl","names":list,"include_market_cap":"true","include_24hr_vol":"true","include_24hr_change":"true","include_last_updated_at":"true"}
 
     response = requests.get(url, headers=headers, params=querystring)
     response.raise_for_status()
@@ -53,7 +53,7 @@ def defineBounds():
 
             if submitted:
                 try:
-                    st.session_state.bounds[current_coin] = (float(upper_bound), float(lower_bound))
+                    st.session_state.bounds[current_coin] = {"upper": float(upper_bound), "lower": float(lower_bound)} #mudei isso pra dicionario pra ficar mais claro na hora de chamar
                     st.session_state.invalid_bounds = False
                     st.session_state.current_index += 1
                 except ValueError:
@@ -79,6 +79,10 @@ def writeHistoricalData(data):
                 f.write(f"{item[0]}: {item[1]}\n")
             f.write("\n")
 
+def checkBounds(data):
+    for entry in data[0]:
+        if data[0][entry][st.session_state.currency] > st.session_state.bounds[entry]["upper"]:
+            print(f"{entry} está com valor mais alto do que o limite superior")
 
 def doUI():
     
@@ -104,12 +108,48 @@ def doUI():
         #Escreve em um arquivo os dados históricos, caso seja bom pra fazer gráfico
         writeHistoricalData(data)
 
-        time.sleep(600)
+        time.sleep(5)
         st.rerun()
 
 def main():
 
-    doUI()
+    if "coins_selected" not in st.session_state:
+        st.session_state.coins_selected = False
+    
+    if "bounds_defined" not in st.session_state:
+        st.session_state.bounds_defined = False
+
+    if "currency" not in st.session_state:
+        st.session_state.currency = "brl"
+
+    if not st.session_state.coins_selected:
+        selectCoins()
+        
+    elif not st.session_state.bounds_defined:
+        defineBounds()
+
+    else:
+        st.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
+        getApiKey()
+        data = getData(st.session_state.selected_coins, 0, st.session_state.api_key)
+
+        st.write(data)
+
+        #Escreve em um arquivo os dados históricos, caso seja bom pra fazer gráfico
+        writeHistoricalData(data)
+
+        l = []
+        i = 0
+        for coin in st.session_state.selected_coins:
+            l.append(st.empty())
+            l[i].text(coin)
+            i += 1
+            
+
+        checkBounds(data)
+
+        time.sleep(5)
+        st.rerun()
 
 if __name__ == "__main__":
     main()
