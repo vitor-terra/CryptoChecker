@@ -4,6 +4,21 @@ from datetime import datetime
 import time
 import pandas as pd
 import altair as alt
+import base64
+
+API_CALL_INTERVAL = 60
+
+#Função para tocar audio automaticamente para contornar uma limitação do frontend
+def autoplay_audio(file_path):
+    with open(file_path, "rb") as f:
+        data = f.read()
+        b64 = base64.b64encode(data).decode()
+        md = f"""
+            <audio controls autoplay="true">
+            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            </audio>
+            """
+        return md
 
 def buildCoinList(list):
     str = ""
@@ -17,7 +32,7 @@ def getData(coin_list, preferred_money, api_key):
     headers = {"x-cg-demo-api-key": api_key}
     querystring = {"vs_currencies":"brl","names":list,"include_market_cap":"true","include_24hr_vol":"true","include_24hr_change":"true","include_last_updated_at":"true"}
 
-    response = requests.get(url, headers=headers, params=querystring)
+    response = requests.get(url, headers = headers, params=querystring, timeout=5)
     response.raise_for_status()
     return [response.json(), datetime.now()]
 
@@ -41,6 +56,7 @@ def selectCoins():
     if st.button("Confirmar"):
         st.session_state.coins_selected = True
         st.session_state.selected_coins = selected_coins
+        st.rerun()
     
 def defineBounds():
     selected_coins = st.session_state.selected_coins
@@ -78,9 +94,42 @@ def defineBounds():
         st.session_state.bounds_defined = True
         st.button("Ok")
 
+def defineBounds2(coin):
+    if "bounds2" not in st.session_state:
+        st.session_state.bounds2 = {}
+        
+    if coin not in st.session_state.bounds2:
+        st.session_state.bounds2[coin] = {"invalid_bounds": False} #Isto é para o sistema saber quando mostrar a mensagem de "Digite apenas valores numéricos" caso o usuário digite valores sem sentido
+        st.session_state.bounds2[coin]["bounds_saved"] = False #Isto é para o sistema saber a partir de qual momento ele pode tentar verificar os limites
+
+
+    with st.form(key = coin):
+        #Mostra a mensagem "Digite apenas valores numéricos" caso o usuário tenha digite coisas sem sentido
+        if "invalid_bounds" in st.session_state.bounds2[coin]:
+            if st.session_state.bounds2[coin]["invalid_bounds"]:
+                st.write("Digite apenas valores numéricos")
+
+        upper_bound = st.text_input(f"Notificar caso {coin} esteja acima de:")
+        lower_bound = st.text_input(f"Notificar caso {coin} esteja abaixo de:")
+        submitted = st.form_submit_button("Confirmar")
+
+        if submitted:
+            try:
+                st.session_state.bounds2[coin] = {"upper": float(upper_bound), "lower": float(lower_bound)}
+                st.session_state.bounds2[coin]["invalid_bounds"] = False
+                st.session_state.bounds2[coin]["bounds_saved"] = True
+                st.success("Informações Salvas")
+                st.rerun()
+
+            except ValueError:
+                #Caso o usuário tenha digitado coisas sem sentido, da próxima vez que o formulário for renderizado para esta moeda, o sistema saberá mostrar a mensagem "Digite apenas valores numéricos"
+                st.session_state.bounds2[coin]["invalid_bounds"] = True
+
+        
+
 def getApiKey():
     if "api_key" not in st.session_state:
-        st.session_state.api_key = "CG-VeKmL7uUadCQACDheMQ7E7hM"
+        st.session_state.api_key = "CG-4xpQ29PLjhe6bmSBtYXVztM9"
 
     st.session_state.api_key = st.text_input("Digite sua própria chave de API aqui. Deixe em branco se quiser usar a chave padrão.")
 
@@ -107,35 +156,28 @@ def getHistoricalData(coin_id, vs_currency, days):
 
 def checkBounds(data):
     for entry in data[0]:
-        if data[0][entry][st.session_state.currency] > st.session_state.bounds[entry]["upper"]:
+        if not st.session_state.bounds2[entry]["bounds_saved"]:
+            continue
+        
+        if data[0][entry][st.session_state.currency] > st.session_state.bounds2[entry]["upper"]:
             print(f"{entry} está com valor mais alto do que o limite superior")
 
-def doUI():
-    
-    if "coins_selected" not in st.session_state:
-        st.session_state.coins_selected = False
-    
-    if "bounds_defined" not in st.session_state:
-        st.session_state.bounds_defined = False
+        if data[0][entry][st.session_state.currency] < st.session_state.bounds2[entry]["lower"]:
+            print(f"{entry} está com valor abaixo do limite inferior")
 
-    if not st.session_state.coins_selected:
-        selectCoins()
+#Verifica os limites, retorna -1 caso eles ainda não tenham sido definidos, retorna 1 caso o valor esteja acima dos limites estabelecidos, 2 caso esteja abaixo e 0 caso esteja dentro dos limites
+def checkBounds2(data, coin):
+    if not st.session_state.bounds2[coin]["bounds_saved"]:
+        return -1
         
-    elif not st.session_state.bounds_defined:
-        defineBounds()
+    if data[0][coin][st.session_state.currency] > st.session_state.bounds2[coin]["upper"]:
+        return 1
 
-    else:
-        st.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
-        getApiKey()
-        data = getData(st.session_state.selected_coins, 0, st.session_state.api_key)
+    if data[0][coin][st.session_state.currency] < st.session_state.bounds2[coin]["lower"]:
+        return 2
+    
+    return 0
 
-        st.write(data)
-
-        #Escreve em um arquivo os dados históricos, caso seja bom pra fazer gráfico
-        writeHistoricalData(data)
-
-        time.sleep(5)
-        st.rerun()
 
 def main():
 
@@ -151,30 +193,55 @@ def main():
     if not st.session_state.coins_selected:
         selectCoins()
         
-    elif not st.session_state.bounds_defined:
-        defineBounds()
+    #elif not st.session_state.bounds_defined:
+    #    defineBounds()
 
     else:
-        st.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
-        getApiKey()
-        data = getData(st.session_state.selected_coins, 0, st.session_state.api_key)
+        if st.button("Reniniciar Escolha de Moedas"):
+            del st.session_state.coins_selected
+            st.rerun()
 
-        st.write(data)
+        st.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
+
+        getApiKey()
+
+        if "last_api_call" not in st.session_state:
+            st.session_state["last_api_call"] = 0
+
+        current_time = time.time()
+        time_since_last_api_call = current_time - st.session_state["last_api_call"]
+        if time_since_last_api_call > API_CALL_INTERVAL:
+            st.session_state["current_data"] = getData(st.session_state.selected_coins, 0, st.session_state.api_key)
+            st.session_state["last_api_call"] = current_time
+
+        #st.write(data)
 
         #Escreve em um arquivo os dados históricos, caso seja bom pra fazer gráfico
-        writeHistoricalData(data)
+        writeHistoricalData(st.session_state["current_data"])
 
         l = []
         i = 0
         for coin in st.session_state.selected_coins:
             l.append(st.empty())
             l[i].text(coin)
-            i += 1
+            defineBounds2(coin)
+
+            bound_verification = checkBounds2(st.session_state["current_data"], coin)
             
+            if bound_verification == 1:
+                l[i].html(autoplay_audio("audiobom.mp3"))
+                time.sleep(2) #O sistema espera 2 segundos antes de continuar para dar tempo de o audio tocar
+                l[i].text(f"{coin}⬆")
 
-        checkBounds(data)
+            if bound_verification == 2:
+                l[i].html(autoplay_audio("audiobom.mp3"))
+                time.sleep(2)
+                l[i].text(f"{coin}⬇︎")
 
-        time.sleep(5)
+
+            i += 1
+
+        time.sleep(60)
         st.rerun()
 
     coin = st.selectbox("Escolha a criptomoeda:", ["bitcoin", "ethereum", "dogecoin"])
