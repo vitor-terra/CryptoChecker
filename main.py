@@ -8,6 +8,8 @@ import base64
 
 API_CALL_INTERVAL = 60
 
+st.set_page_config(page_title="Crypto Checker", layout="wide")
+
 #Função para tocar audio automaticamente para contornar uma limitação do frontend
 def autoplay_audio(file_path):
     with open(file_path, "rb") as f:
@@ -123,15 +125,13 @@ def defineBounds2(coin):
 
             except ValueError:
                 #Caso o usuário tenha digitado coisas sem sentido, da próxima vez que o formulário for renderizado para esta moeda, o sistema saberá mostrar a mensagem "Digite apenas valores numéricos"
-                st.session_state.bounds2[coin]["invalid_bounds"] = True
-
-        
+                st.session_state.bounds2[coin]["invalid_bounds"] = True       
 
 def getApiKey():
     if "api_key" not in st.session_state:
         st.session_state.api_key = "CG-4xpQ29PLjhe6bmSBtYXVztM9"
 
-    st.session_state.api_key = st.text_input("Digite sua própria chave de API aqui. Deixe em branco se quiser usar a chave padrão.")
+    st.session_state.api_key = st.sidebar.text_input("Digite sua própria chave de API aqui. Deixe em branco se quiser usar a chave padrão.")
 
 def writeHistoricalData(data):
     for entry in data[0]:
@@ -178,6 +178,39 @@ def checkBounds2(data, coin):
     
     return 0
 
+def plotPriceChart(dfHist, coin, vsCurrency):
+    if not dfHist.empty:
+        minPrice = float(dfHist["price"].min())
+        maxPrice = float(dfHist["price"].max())
+
+        if minPrice == maxPrice:
+            pad = max(1.0, abs(minPrice) * 0.001)
+            minPrice -= pad
+            maxPrice += pad
+
+        chart = (
+            alt.Chart(dfHist)
+            .mark_line()
+            .encode(
+                x=alt.X("timestamp:T", title="Data"),
+                y=alt.Y(
+                    "price:Q",
+                    title=f"Preço ({vsCurrency.upper()})",
+                    scale=alt.Scale(domain=[minPrice, maxPrice], nice=False),
+                ),
+                tooltip=[
+                    alt.Tooltip("timestamp:T", title="Hora"),
+                    alt.Tooltip("price:Q", format=".2f", title="Preço"),
+                ],
+            )
+            .properties(height=400)
+            .interactive()
+        )
+
+        st.altair_chart(chart, use_container_width=True)
+        st.caption(f"Intervalo de valores exibido: {minPrice:.2f} — {maxPrice:.2f} {vsCurrency.upper()}")
+    else:
+        st.warning(f"Nenhum dado histórico de {coin} encontrado para o período selecionado.") 
 
 def main():
 
@@ -191,19 +224,55 @@ def main():
         st.session_state.currency = "brl"
 
     if not st.session_state.coins_selected:
-        selectCoins()
+        col1, col2, col3 = st.columns([2, 4, 2])
+        with col2:
+            st.markdown("<h1 style='text-align: center;'>Crypto Checker</h1>", unsafe_allow_html=True)
+            selectCoins()
         
     #elif not st.session_state.bounds_defined:
     #    defineBounds()
 
     else:
+        selected_coins = st.session_state.get("selected_coins", [])
+        if not selected_coins:
+            st.warning("Por favor, selecione ao menos uma moeda.")
+        else:
+            coin_map = {
+                "Bitcoin": "bitcoin",
+                "Ethereum": "ethereum",
+            }
+
+            vsCurrency = st.sidebar.selectbox("Converter ativos para:", ["usd", "brl", "eur"])
+            timeRange = st.sidebar.selectbox("Intervalo de tempo:", ["últimas 24h", "última semana", "último mês"])
+           
+            daysMap = {"últimas 24h": 1, "última semana": 7, "último mês": 30}
+            days = daysMap[timeRange]
+
+            for coin in selected_coins:
+                st.subheader(f"{coin}")
+                coin_id = coin_map.get(coin.lower().capitalize(), coin.lower())
+
+                price = getCryptoPrice(coin_id, vsCurrency)
+                if price is not None:
+                    st.metric("Preço Atual", f"{price:.2f} {vsCurrency.upper()}")
+
+                dfHist = getHistoricalData(coin_id, vsCurrency, days)
+                
+                dfHist = dfHist.dropna(subset=["price"]).copy()
+                dfHist["price"] = pd.to_numeric(dfHist["price"], errors="coerce")
+                dfHist = dfHist.dropna(subset=["price"])
+
+                plotPriceChart(dfHist, coin, vsCurrency)
+                st.caption(f"Última atualização {coin}: {datetime.now().strftime('%H:%M:%S')}")
+
+        
         if st.button("Reniniciar Escolha de Moedas"):
             del st.session_state.coins_selected
             st.rerun()
 
-        st.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
-
         getApiKey()
+
+        st.sidebar.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
 
         if "last_api_call" not in st.session_state:
             st.session_state["last_api_call"] = 0
@@ -238,64 +307,10 @@ def main():
                 time.sleep(2)
                 l[i].text(f"{coin}⬇︎")
 
-
             i += 1
 
         time.sleep(60)
         st.rerun()
-
-    coin = st.selectbox("Escolha a criptomoeda:", ["bitcoin", "ethereum", "dogecoin"])
-    vsCurrency = st.selectbox("Converter para:", ["usd", "brl", "eur"])
-    timeRange = st.selectbox("Intervalo de tempo:", ["últimas 24h", "última semana", "último mês"])
-
-    daysMap = {"últimas 24h": 1, "última semana": 7, "último mês": 30}
-    days = daysMap[timeRange]
-
-    price = getCryptoPrice(coin, vsCurrency)
-    if price is not None:
-        st.metric("Preço Atual", f"{price:.2f} {vsCurrency.upper()}")
-
-    dfHist = getHistoricalData(coin, vsCurrency, days)
-    st.subheader(f"Histórico - {coin.capitalize()} / {vsCurrency.upper()}")
-
-    dfHist = dfHist.dropna(subset=["price"]).copy()
-    dfHist["price"] = pd.to_numeric(dfHist["price"], errors="coerce")
-    dfHist = dfHist.dropna(subset=["price"])
-
-    if not dfHist.empty:
-        minPrice = float(dfHist["price"].min())
-        maxPrice = float(dfHist["price"].max())
-
-        if minPrice == maxPrice:
-            pad = max(1.0, abs(minPrice) * 0.001)
-            minPrice -= pad
-            maxPrice += pad
-
-        chart = (
-            alt.Chart(dfHist)
-            .mark_line()
-            .encode(
-                x=alt.X("timestamp:T", title="Data"),
-                y=alt.Y(
-                    "price:Q",
-                    title=f"Preço ({vsCurrency.upper()})",
-                    scale=alt.Scale(domain=[minPrice, maxPrice], nice=False),
-                ),
-                tooltip=[
-                    alt.Tooltip("timestamp:T", title="Hora"),
-                    alt.Tooltip("price:Q", format=".2f", title="Preço"),
-                ],
-            )
-            .properties(height=400)
-            .interactive()
-        )
-
-        st.altair_chart(chart, use_container_width=True)
-        st.caption(f"Intervalo de valores exibido: {minPrice:.2f} — {maxPrice:.2f} {vsCurrency.upper()}")
-    else:
-        st.warning("Nenhum dado histórico encontrado para o período selecionado.")    
-    
-    st.caption(f"Última atualização: {datetime.now().strftime('%H:%M:%S')}")
 
 if __name__ == "__main__":
     main()
