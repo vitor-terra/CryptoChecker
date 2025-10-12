@@ -32,11 +32,20 @@ def getData(coin_list, preferred_money, api_key):
     list = buildCoinList(coin_list)
     url = "https://api.coingecko.com/api/v3/simple/price"
     headers = {"x-cg-demo-api-key": api_key}
-    querystring = {"vs_currencies":"brl","names":list,"include_market_cap":"true","include_24hr_vol":"true","include_24hr_change":"true","include_last_updated_at":"true"}
+    querystring = {"vs_currencies":preferred_money,"names":list,"include_market_cap":"true","include_24hr_vol":"true","include_24hr_change":"true","include_last_updated_at":"true"}
 
-    response = requests.get(url, headers = headers, params=querystring, timeout=5)
-    response.raise_for_status()
-    return [response.json(), datetime.now()]
+    if "last_api_call" not in st.session_state:
+        st.session_state["last_api_call"] = 0
+
+    current_time = time.time()
+    time_since_last_api_call = current_time - st.session_state["last_api_call"]
+    if time_since_last_api_call > API_CALL_INTERVAL:
+        response = requests.get(url, headers = headers, params=querystring, timeout=5)
+        response.raise_for_status()
+    
+        st.session_state["current_data"] = [response.json(), datetime.now()]
+        st.session_state["last_api_call"] = current_time
+
 
 # Função para buscar o preço atual de uma cripto sem usar a chave da API
 def getCryptoPrice(coin_id, vs_currency="usd"):
@@ -60,43 +69,7 @@ def selectCoins():
         st.session_state.selected_coins = selected_coins
         st.rerun()
     
-def defineBounds():
-    selected_coins = st.session_state.selected_coins
-
-    if "bounds" not in st.session_state:
-        st.session_state.bounds = {}
-
-    if "current_index" not in st.session_state:
-        st.session_state.current_index = 0
-
-    if st.session_state.current_index < len(selected_coins):
-        i = st.session_state.current_index
-        current_coin = selected_coins[i]
-
-        with st.form(key = current_coin):
-            if "invalid_bounds" in st.session_state:
-                if st.session_state.invalid_bounds:
-                    st.write("Digite apenas valores numéricos")
-
-            upper_bound = st.text_input(f"Notificar caso {current_coin} esteja acima de:")
-            lower_bound = st.text_input(f"Notificar caso {current_coin} esteja abaixo de:")
-            submitted = st.form_submit_button("Confirmar")
-
-            if submitted:
-                try:
-                    st.session_state.bounds[current_coin] = {"upper": float(upper_bound), "lower": float(lower_bound)} #mudei isso pra dicionario pra ficar mais claro na hora de chamar
-                    st.session_state.invalid_bounds = False
-                    st.session_state.current_index += 1
-                except ValueError:
-                #Tecnicamente, o usuário pode definir um limite superior menor do que o limite inferior se ele quiser. O programa vai se comportar de acordo.
-                    st.session_state.invalid_bounds = True
-                st.rerun()
-    else:
-        st.success("Informações salvas")
-        st.session_state.bounds_defined = True
-        st.button("Ok")
-
-def defineBounds2(coin):
+def defineBounds(coin):
     if "bounds2" not in st.session_state:
         st.session_state.bounds2 = {}
         
@@ -154,19 +127,8 @@ def getHistoricalData(coin_id, vs_currency, days):
     except Exception:
         return pd.DataFrame(columns=["timestamp", "price"])
 
-def checkBounds(data):
-    for entry in data[0]:
-        if not st.session_state.bounds2[entry]["bounds_saved"]:
-            continue
-        
-        if data[0][entry][st.session_state.currency] > st.session_state.bounds2[entry]["upper"]:
-            print(f"{entry} está com valor mais alto do que o limite superior")
-
-        if data[0][entry][st.session_state.currency] < st.session_state.bounds2[entry]["lower"]:
-            print(f"{entry} está com valor abaixo do limite inferior")
-
 #Verifica os limites, retorna -1 caso eles ainda não tenham sido definidos, retorna 1 caso o valor esteja acima dos limites estabelecidos, 2 caso esteja abaixo e 0 caso esteja dentro dos limites
-def checkBounds2(data, coin):
+def checkBounds(data, coin):
     if not st.session_state.bounds2[coin]["bounds_saved"]:
         return -1
         
@@ -228,9 +190,6 @@ def main():
         with col2:
             st.markdown("<h1 style='text-align: center; font-weight: bold; color: #31326F;'>Crypto<span style='color:#3A6F43;'>Checker</span></h1>", unsafe_allow_html=True)
             selectCoins()
-        
-    #elif not st.session_state.bounds_defined:
-    #    defineBounds()
 
     else:
         selected_coins = st.session_state.get("selected_coins", [])
@@ -255,11 +214,42 @@ def main():
 
             vsCurrency = st.sidebar.selectbox("Converter ativos para:", ["usd", "brl", "eur"])
             timeRange = st.sidebar.selectbox("Intervalo de tempo:", ["últimas 24h", "última semana", "último mês"])
+
+            st.session_state.currency = vsCurrency
+
+            getApiKey()
+            getData(st.session_state.selected_coins, st.session_state.currency, st.session_state.api_key)
+
+            if "current_data" in st.session_state:
+                #Escreve em um arquivo os dados históricos em um arquivo, usado para fazer os gráficos
+                writeHistoricalData(st.session_state["current_data"])
            
             daysMap = {"últimas 24h": 1, "última semana": 7, "último mês": 30}
             days = daysMap[timeRange]
 
+            l = []
+            i = 0
+
             for coin in selected_coins:
+
+                l.append(st.empty())
+                l[i].text(coin)
+                defineBounds(coin)
+
+                bound_verification = checkBounds(st.session_state["current_data"], coin)
+            
+                if bound_verification == 1:
+                    l[i].html(autoplay_audio("audiobom.mp3"))
+                    time.sleep(2) #O sistema espera 2 segundos antes de continuar para dar tempo de o audio tocar
+                    l[i].text(f"{coin}⬆")
+
+                if bound_verification == 2:
+                    l[i].html(autoplay_audio("audiobom.mp3"))
+                    time.sleep(2)
+                    l[i].text(f"{coin}⬇︎")
+
+                i += 1
+
                 st.subheader(f"{coin}")
                 coin_id = coin_map.get(coin.lower().capitalize(), coin.lower())
 
@@ -278,49 +268,16 @@ def main():
 
         
         if st.button("Reiniciar Escolha de Moedas"):
-            del st.session_state.coins_selected
+            for key in st.session_state.keys():
+                if key == "last_api_call" or key == "current_data":
+                    continue
+                del st.session_state[key]
             st.rerun()
 
-        getApiKey()
-
+        
         st.sidebar.markdown("*Dados fornecidos por [CoinGecko](https://www.coingecko.com)")
 
-        if "last_api_call" not in st.session_state:
-            st.session_state["last_api_call"] = 0
-
-        current_time = time.time()
-        time_since_last_api_call = current_time - st.session_state["last_api_call"]
-        if time_since_last_api_call > API_CALL_INTERVAL:
-            st.session_state["current_data"] = getData(st.session_state.selected_coins, 0, st.session_state.api_key)
-            st.session_state["last_api_call"] = current_time
-
-        #st.write(data)
-
-        #Escreve em um arquivo os dados históricos, caso seja bom pra fazer gráfico
-        writeHistoricalData(st.session_state["current_data"])
-
-        l = []
-        i = 0
-        for coin in st.session_state.selected_coins:
-            l.append(st.empty())
-            l[i].text(coin)
-            defineBounds2(coin)
-
-            bound_verification = checkBounds2(st.session_state["current_data"], coin)
-            
-            if bound_verification == 1:
-                l[i].html(autoplay_audio("audiobom.mp3"))
-                time.sleep(2) #O sistema espera 2 segundos antes de continuar para dar tempo de o audio tocar
-                l[i].text(f"{coin}⬆")
-
-            if bound_verification == 2:
-                l[i].html(autoplay_audio("audiobom.mp3"))
-                time.sleep(2)
-                l[i].text(f"{coin}⬇︎")
-
-            i += 1
-
-        time.sleep(60)
+        time.sleep(30)
         st.rerun()
 
 if __name__ == "__main__":
