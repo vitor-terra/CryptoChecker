@@ -226,7 +226,7 @@ def main():
     if not st.session_state.coins_selected:
         col1, col2, col3 = st.columns([2, 4, 2])
         with col2:
-            st.markdown("<h1 style='text-align: center;'>Crypto Checker</h1>", unsafe_allow_html=True)
+            st.markdown("<h1 style='text-align: center; font-weight: bold; color: #31326F;'>Crypto<span style='color:#3A6F43;'>Checker</span></h1>", unsafe_allow_html=True)
             selectCoins()
         
     #elif not st.session_state.bounds_defined:
@@ -241,6 +241,17 @@ def main():
                 "Bitcoin": "bitcoin",
                 "Ethereum": "ethereum",
             }
+
+            #st.sidebar.title("Crypto Checker")
+            st.sidebar.markdown(
+                """
+                <div style='text-align: center; margin-bottom: 10px;'>
+                    <span style='font-size: 32px; font-weight: bold; color: #31326F;'>Crypto<span style='color:#3A6F43;'>Checker</span></span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            st.sidebar.markdown("---")
 
             vsCurrency = st.sidebar.selectbox("Converter ativos para:", ["usd", "brl", "eur"])
             timeRange = st.sidebar.selectbox("Intervalo de tempo:", ["últimas 24h", "última semana", "último mês"])
@@ -266,7 +277,7 @@ def main():
                 st.caption(f"Última atualização {coin}: {datetime.now().strftime('%H:%M:%S')}")
 
         
-        if st.button("Reniniciar Escolha de Moedas"):
+        if st.button("Reiniciar Escolha de Moedas"):
             del st.session_state.coins_selected
             st.rerun()
 
