@@ -8,7 +8,7 @@ import base64
 
 ###################------------------INSTRUÇÕES------------------###################
 
-#PARA RODAR O PROGRAMA VOCÊ DEVE PRIMEIRO INSTALAR OS MÓDULOS NECESSÁRIOS. ISSO É FEITO ATRAVÉS DOS SEGUINTES COMANDOS:
+# 1. PARA RODAR O PROGRAMA VOCÊ DEVE PRIMEIRO INSTALAR OS MÓDULOS NECESSÁRIOS. ISSO É FEITO ATRAVÉS DOS SEGUINTES COMANDOS:
 #PODE SER INTERESSANTE CRIAR UM AMBIENTE VIRTUAL ANTES DE INSTALAR OS MÓDULOS, CASO NÃO QUEIRA INSTALÁ-LOS GLOBALMENTE
 
 #pip install streamlit
@@ -17,10 +17,21 @@ import base64
 #pip install requests
 #Requests é o módulo usado para fazer requisições para a API
 
-#pip install (...)
+#pip install pandas
+#Pandas é usado para manipular os dados obtidos da API
 
-#APÓS INSTALAR OS MÓDULOS NECESSÁRIOS, CERTIFIQUE-SE DE QUE OS ARQUIVOS DE ÁUDIO "audio_higher.mp3" E "audio_lower.mp3" ESTÃO NA MESMA PASTA QUE "main.py"
-#ABRA O PROMPT DE COMANDO NA PASTA ONDE ESTÃO OS ARQUIVOS E RODE O COMANDO
+#pip install altair
+#Altair é usado para plotar os gráficos
+
+#pip install pycoingecko
+#Pycoingecko é uma biblioteca que facilita o uso da API da CoinGecko, mas não é estritamente necessária
+
+# Para instalar todas as dependências de uma vez, você pode usar o comando:
+# pip install streamlit requests pandas altair pycoingecko
+
+# 2. APÓS INSTALAR OS MÓDULOS NECESSÁRIOS, CERTIFIQUE-SE DE QUE OS ARQUIVOS DE ÁUDIO "audio_higher.mp3" E "audio_lower.mp3" ESTÃO NA MESMA PASTA QUE "main.py"
+
+# 3. ABRA O PROMPT DE COMANDO NA PASTA ONDE ESTÃO OS ARQUIVOS E RODE O COMANDO
 #"streamlit run main.py"
 #ISSO DEVE ABRIR UMA ABA NO SEU NAVEGADOR PADRÃO ONDE O PROGRAMA SERÁ EXECUTADO
 
@@ -148,6 +159,7 @@ def writeHistoricalData(data):
                 f.write(f"{item[0]}: {item[1]}\n")
             f.write("\n")
 
+#Pega os dados históricos da moeda. A API da CoinGecko permite pegar dados históricos de até 90 dias no plano grátis
 def getHistoricalData(coin_id, vs_currency, days):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {"vs_currency": vs_currency, "days": days}
@@ -155,8 +167,8 @@ def getHistoricalData(coin_id, vs_currency, days):
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         prices = data.get("prices", [])
-        df = pd.DataFrame(prices, columns=["timestamp", "price"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df = pd.DataFrame(prices, columns=["timestamp", "price"]) #A API retorna os dados em milissegundos
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms") #Converte o timestamp de milissegundos para datetime
         return df
     except Exception:
         return pd.DataFrame(columns=["timestamp", "price"])
@@ -174,8 +186,11 @@ def checkBounds(data, coin):
     
     return 0
 
+#Plota o gráfico de preços usando Altair
+#Inclui linhas horizontais para os limites superior e inferior, se definidos
 def plotPriceChart(dfHist, coin, vsCurrency, upper_bound=None, lower_bound=None):
     if not dfHist.empty:
+        # Define os limites do eixo y com base nos dados
         minPrice = float(dfHist["price"].min())
         maxPrice = float(dfHist["price"].max())
 
@@ -190,10 +205,10 @@ def plotPriceChart(dfHist, coin, vsCurrency, upper_bound=None, lower_bound=None)
             alt.Chart(dfHist)
             .mark_line()
             .encode(
-                x=alt.X("timestamp:T", title="Data"),
+                x=alt.X("timestamp:T", title="Data"), 
                 y=alt.Y(
                     "price:Q",
-                    title=f"Preço ({vsCurrency.upper()})",
+                    title=f"Preço ({vsCurrency.upper()})", 
                     scale=alt.Scale(domain=[minPrice, maxPrice]),
                 ),
                 tooltip=[
@@ -233,6 +248,7 @@ def main():
     if "currency" not in st.session_state:
         st.session_state.currency = "usd"
 
+    #Dicionário que guarda os limites de cada moeda
     if "bounds" not in st.session_state:
         st.session_state.bounds = {}
 
@@ -243,16 +259,17 @@ def main():
             selectCoins()
 
     else:
+        #Caso as moedas já tenham sido selecionadas, o sistema deve exibir os gráficos e tocar os áudios quando necessário
         selected_coins = st.session_state.get("selected_coins", [])
         if not selected_coins:
             st.warning("Por favor, selecione ao menos uma moeda.")
         else:
+            #Mapeia o nome da moeda para o id usado na API
             coin_map = {
                 "Bitcoin": "bitcoin",
                 "Ethereum": "ethereum",
             }
 
-            #st.sidebar.title("Crypto Checker")
             st.sidebar.markdown(
                 """
                 <div style='text-align: center; margin-bottom: 10px;'>
@@ -263,10 +280,9 @@ def main():
             )
             st.sidebar.markdown("---")
 
+            #Opções de ativo e intervalo de tempo no sidebar
             vsCurrency = st.sidebar.selectbox("Converter ativos para:", ["usd", "brl", "eur"])
             timeRange = st.sidebar.selectbox("Intervalo de tempo:", ["últimas 24h", "última semana", "último mês"])
-
-            #st.session_state.currency = vsCurrency
 
             getApiKey()
             getData(st.session_state.selected_coins, vsCurrency, st.session_state.api_key)
@@ -277,6 +293,7 @@ def main():
                 #Escreve em um arquivo os dados históricos em um arquivo
                 writeHistoricalData(st.session_state["current_data"])
            
+            #Mapeia o intervalo de tempo selecionado para o número de dias correspondente
             daysMap = {"últimas 24h": 1, "última semana": 7, "último mês": 30}
             days = daysMap[timeRange]
 
@@ -322,9 +339,9 @@ def main():
 
                 #Incrementamos a posição da lista para criar os containers da próxima moeda na próxima iteração do loop
                 i += 1
-
+                
                 st.subheader(f"{coin}")
-                coin_id = coin_map.get(coin.lower().capitalize(), coin.lower())
+                coin_id = coin_map.get(coin.lower().capitalize(), coin.lower()) #Mapeia o nome da moeda para o id usado na API
 
                 # Pega o preço do dicionário retornado
                 price = current_data.get(coin, {}).get(vsCurrency)
@@ -349,11 +366,11 @@ def main():
                 #Caso o tempo ainda não tenha passado, simplesmente usamos os dados da última chamada
                 dfHist = st.session_state["hist_data"]
                 
-                dfHist = dfHist.dropna(subset=["price"]).copy()
-                dfHist["price"] = pd.to_numeric(dfHist["price"], errors="coerce")
-                dfHist = dfHist.dropna(subset=["price"])
+                dfHist = dfHist.dropna(subset=["price"]).copy() # Remove linhas com valores NaN na coluna 'price'
+                dfHist["price"] = pd.to_numeric(dfHist["price"], errors="coerce") # Converte a coluna 'price' para numérico, forçando erros a NaN
+                dfHist = dfHist.dropna(subset=["price"]) # Remove novamente linhas com valores NaN na coluna 'price', caso a conversão tenha gerado novos NaNs
 
-                bounds = st.session_state.bounds.get(coin, {})
+                bounds = st.session_state.bounds.get(coin, {}) #Pega os limites definidos para a moeda atual
                 
                 upper = bounds.get("upper", None)
                 lower = bounds.get("lower", None)
