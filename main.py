@@ -46,18 +46,6 @@ def getData(coin_list, preferred_money, api_key):
         st.session_state["current_data"] = [response.json(), datetime.now()]
         st.session_state["last_api_call"] = current_time
 
-
-# Função para buscar o preço atual de uma cripto sem usar a chave da API
-def getCryptoPrice(coin_id, vs_currency="usd"):
-    url = f"https://api.coingecko.com/api/v3/simple/price"
-    querystring = {"ids": coin_id, "vs_currencies": vs_currency}
-    try:
-        response = requests.get(url, params=querystring, timeout=5)
-        data = response.json()
-        return data.get(coin_id, {}).get(vs_currency, None)
-    except Exception:
-        return None
-
 def selectCoins():
     options = ["Ethereum", "Bitcoin"]
     selected_coins = st.multiselect(
@@ -140,7 +128,7 @@ def checkBounds(data, coin):
     
     return 0
 
-def plotPriceChart(dfHist, coin, vsCurrency):
+def plotPriceChart(dfHist, coin, vsCurrency, upper_bound=None, lower_bound=None):
     if not dfHist.empty:
         minPrice = float(dfHist["price"].min())
         maxPrice = float(dfHist["price"].max())
@@ -150,6 +138,8 @@ def plotPriceChart(dfHist, coin, vsCurrency):
             minPrice -= pad
             maxPrice += pad
 
+        zoom = alt.selection_interval(bind='scales', encodings=['y'])
+
         chart = (
             alt.Chart(dfHist)
             .mark_line()
@@ -158,16 +148,30 @@ def plotPriceChart(dfHist, coin, vsCurrency):
                 y=alt.Y(
                     "price:Q",
                     title=f"Preço ({vsCurrency.upper()})",
-                    scale=alt.Scale(domain=[minPrice, maxPrice], nice=False),
+                    scale=alt.Scale(domain=[minPrice, maxPrice]),
                 ),
                 tooltip=[
                     alt.Tooltip("timestamp:T", title="Hora"),
                     alt.Tooltip("price:Q", format=".2f", title="Preço"),
                 ],
             )
+            .add_params(zoom)
             .properties(height=400)
-            .interactive()
         )
+
+        # Linha de limite superior
+        if upper_bound is not None:
+            upper_line = alt.Chart(pd.DataFrame({"y": [upper_bound]})).mark_rule(
+                color="red", strokeDash=[6, 4]
+            ).encode(y="y:Q")
+            chart += upper_line
+
+        # Linha de limite inferior
+        if lower_bound is not None:
+            lower_line = alt.Chart(pd.DataFrame({"y": [lower_bound]})).mark_rule(
+                color="green", strokeDash=[6, 4]
+            ).encode(y="y:Q")
+            chart += lower_line     
 
         st.altair_chart(chart, use_container_width=True)
         st.caption(f"Intervalo de valores exibido: {minPrice:.2f} — {maxPrice:.2f} {vsCurrency.upper()}")
@@ -184,6 +188,9 @@ def main():
 
     if "currency" not in st.session_state:
         st.session_state.currency = "brl"
+
+    if "bounds2" not in st.session_state:
+        st.session_state.bounds2 = {}
 
     if not st.session_state.coins_selected:
         col1, col2, col3 = st.columns([2, 4, 2])
@@ -220,6 +227,8 @@ def main():
             getApiKey()
             getData(st.session_state.selected_coins, st.session_state.currency, st.session_state.api_key)
 
+            current_data = st.session_state.get("current_data", [{}])[0]  # dicionário retornado pela API
+
             if "current_data" in st.session_state:
                 #Escreve em um arquivo os dados históricos em um arquivo, usado para fazer os gráficos
                 writeHistoricalData(st.session_state["current_data"])
@@ -253,7 +262,8 @@ def main():
                 st.subheader(f"{coin}")
                 coin_id = coin_map.get(coin.lower().capitalize(), coin.lower())
 
-                price = getCryptoPrice(coin_id, vsCurrency)
+                # Pega o preço do dicionário retornado
+                price = current_data.get(coin, {}).get(vsCurrency)
                 if price is not None:
                     st.metric("Preço Atual", f"{price:.2f} {vsCurrency.upper()}")
 
@@ -263,8 +273,26 @@ def main():
                 dfHist["price"] = pd.to_numeric(dfHist["price"], errors="coerce")
                 dfHist = dfHist.dropna(subset=["price"])
 
-                plotPriceChart(dfHist, coin, vsCurrency)
-                st.caption(f"Última atualização {coin}: {datetime.now().strftime('%H:%M:%S')}")
+                bounds = st.session_state.bounds2.get(coin, {})
+                
+                upper = bounds.get("upper", None)
+                lower = bounds.get("lower", None)
+
+                # Inicializa o histórico persistente, se necessário
+                if "last_valid_df" not in st.session_state:
+                    st.session_state.last_valid_df = {}
+
+                # Se há dados válidos, atualiza o gráfico e salva o DataFrame
+                if not dfHist.empty:
+                    st.session_state.last_valid_df[coin] = dfHist
+                    plotPriceChart(dfHist, coin, vsCurrency, upper_bound=upper, lower_bound=lower)
+                    st.caption(f"Última atualização {coin}: {datetime.now().strftime('%H:%M:%S')}")
+                else:
+                    # Se não há dados novos, mantém o último gráfico válido
+                    if coin in st.session_state.last_valid_df:
+                        plotPriceChart(st.session_state.last_valid_df[coin], coin, vsCurrency, upper_bound=upper, lower_bound=lower)
+                    else:
+                        st.warning(f"Aguardando dados históricos para {coin}...")
 
         
         if st.button("Reiniciar Escolha de Moedas"):
